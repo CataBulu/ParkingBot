@@ -1,10 +1,13 @@
-# Secrete locale (token Telegram)
+# Local secrets (Telegram token)
 secrets.local.bat
-env_vars.json
 .env
 
-# Output local de la aws lambda invoke
+# Local output of `aws lambda invoke`
 out*.json
+
+# Dashboard build output / dependencies
+node_modules/
+dashboard/frontend/dist/
 
 # Python
 __pycache__/
@@ -12,6 +15,6 @@ __pycache__/
 .venv/
 venv/
 
-# Extractor Metin2 - alt proiect, nu tine de ParkingBot
+# Unrelated local files
 extract_pak.py
 extracted*/
