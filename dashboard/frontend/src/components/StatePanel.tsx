@@ -1,36 +1,45 @@
 import type { BotState } from "../api";
 import { dateTime, timeAgo } from "../format";
+import type { Redact } from "../privacy";
 
-export function StatePanel({ state }: { state: BotState | null }) {
+export function StatePanel({ state, now, redact }: { state: BotState | null; now: number; redact: Redact }) {
   const saved = state?.value.state;
+  const residences = Object.entries(saved?.residences ?? {});
+  const lots = residences.flatMap(([, r]) => Object.values(r.lots));
+  const free = lots.reduce((n, l) => n + l.free.length, 0);
+  const sessionOpen = lots.some((l) => l.session_open);
+
   return (
     <section className="card">
-      <h2>
-        What the bot sees
-        {state && <span className="right updated">changed {timeAgo(state.lastModified)}</span>}
-      </h2>
+      <div className="card-head">
+        <h2>🅿️ What the bot sees</h2>
+        {state && <span className="right muted">updated {timeAgo(state.lastModified, now)}</span>}
+      </div>
       {!saved ? (
-        <div className="empty">No saved state yet. The first run creates it.</div>
+        <div className="empty">⏳ No saved state yet. The first run creates it.</div>
       ) : (
         <>
-          {Object.entries(saved.residences).map(([id, residence]) => {
-            const lots = Object.entries(residence.lots);
-            const openSession = lots.some(([, l]) => l.session_open);
+          <div className="mini-stats">
+            <div className="mini">
+              <div className="v">{sessionOpen ? "🟢" : "⚪"}</div>
+              <div className="l">Session {sessionOpen ? "open" : "closed"}</div>
+            </div>
+            <div className="mini">
+              <div className="v">{lots.length}</div>
+              <div className="l">lots within 30 m</div>
+            </div>
+            <div className="mini">
+              <div className="v">{free}</div>
+              <div className="l">free spots</div>
+            </div>
+          </div>
+          {residences.map(([id, residence]) => {
+            const entries = Object.entries(residence.lots);
             return (
               <div key={id}>
                 <dl className="kv">
                   <dt>Residence</dt>
-                  <dd>
-                    {residence.name} <span className="updated">(ID {id})</span>
-                  </dd>
-                  <dt>Session</dt>
-                  <dd>
-                    {openSession ? (
-                      <span className="tag">🟢 Open: go bid!</span>
-                    ) : (
-                      <span className="tag">⚪ Closed</span>
-                    )}
-                  </dd>
+                  <dd>{redact(residence.name)}</dd>
                   <dt>Registrations</dt>
                   <dd>
                     {saved.registrations.auctions} auctions · {saved.registrations.waitlist} waitlist
@@ -39,16 +48,19 @@ export function StatePanel({ state }: { state: BotState | null }) {
                   <dd>{dateTime(state!.lastModified)}</dd>
                 </dl>
                 <div className="lots">
-                  {lots.length === 0 ? (
+                  {entries.length === 0 ? (
                     <div className="empty">
-                      No parking lots within 30 m of this residence right now. The bot will alert you when one appears or
-                      a session opens.
+                      <span aria-hidden="true">🔭</span>
+                      <span>
+                        No parking lots near this residence right now, and no session is open. That's normal between
+                        sessions. The bot will ping you as soon as that changes.
+                      </span>
                     </div>
                   ) : (
-                    lots.map(([lotId, lot]) => (
+                    entries.map(([lotId, lot]) => (
                       <div key={lotId} className="lot">
                         <div className="name">
-                          {lot.name} {lot.session_open && <span className="tag">Session open</span>}
+                          {lot.name} {lot.session_open && <span className="tag">🟢 Session open</span>}
                         </div>
                         <div className="meta">
                           {lot.free.length} of {lot.total} spots free

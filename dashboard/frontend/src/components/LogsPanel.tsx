@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type LogLine } from "../api";
 import { clock } from "../format";
+import type { Redact } from "../privacy";
 
-export function LogsPanel({ refreshKey }: { refreshKey: number }) {
+export function LogsPanel({ refreshKey, redact }: { refreshKey: number; redact: Redact }) {
+  const [open, setOpen] = useState(false);
   const [minutes, setMinutes] = useState(60);
   const [lines, setLines] = useState<LogLine[]>([]);
   const [errorsOnly, setErrorsOnly] = useState(false);
@@ -22,44 +24,52 @@ export function LogsPanel({ refreshKey }: { refreshKey: number }) {
   }, [minutes]);
 
   useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+    if (open) load(); // only fetch logs while the section is open
+  }, [open, load, refreshKey]);
 
   const shown = errorsOnly ? lines.filter((l) => l.level === "error") : lines;
+  const errorCount = lines.filter((l) => l.level === "error").length;
 
   return (
-    <section className="card">
-      <h2>
-        Lambda logs
-        <span className="right" style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <label className="updated">
-            <input type="checkbox" checked={errorsOnly} onChange={(e) => setErrorsOnly(e.target.checked)} /> errors only
-          </label>
-          <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} aria-label="Time range">
-            <option value={30}>30 min</option>
-            <option value={60}>1 hour</option>
-            <option value={360}>6 hours</option>
-            <option value={1440}>24 hours</option>
-          </select>
-          <button className="btn" onClick={load} disabled={loading}>
-            {loading ? <span className="spinner" aria-hidden="true" /> : "↻"}
-          </button>
-        </span>
-      </h2>
-      {error ? (
-        <div className="result error">{error}</div>
-      ) : shown.length === 0 ? (
-        <div className="empty">{errorsOnly ? "No errors in this period. 👍" : "No log lines in this period."}</div>
-      ) : (
-        <div className="logs">
-          {[...shown].reverse().map((l, i) => (
-            <div key={i} className={`log-line ${l.level}`}>
-              <span className="ts">{clock(l.ts)}</span>
-              <span>{l.message}</span>
+    <details className="card" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary>
+        <span className="chev" aria-hidden="true">▶</span>
+        🛠️ Technical logs
+        <span className="muted" style={{ fontWeight: 400 }}>raw Lambda output, for troubleshooting</span>
+      </summary>
+      {open && (
+        <>
+          <div className="log-tools">
+            <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} aria-label="Time range">
+              <option value={30}>Last 30 min</option>
+              <option value={60}>Last hour</option>
+              <option value={360}>Last 6 hours</option>
+              <option value={1440}>Last 24 hours</option>
+            </select>
+            <label className="muted">
+              <input type="checkbox" checked={errorsOnly} onChange={(e) => setErrorsOnly(e.target.checked)} /> errors only
+              {lines.length > 0 && ` (${errorCount})`}
+            </label>
+            <button className="btn small" onClick={load} disabled={loading}>
+              {loading ? <span className="spinner" aria-hidden="true" /> : "↻"} Reload
+            </button>
+          </div>
+          {error ? (
+            <div className="empty">✕ {error}</div>
+          ) : shown.length === 0 ? (
+            <div className="empty">{loading ? "Loading…" : errorsOnly ? "No errors in this period. 👍" : "No log lines in this period."}</div>
+          ) : (
+            <div className="logs">
+              {[...shown].reverse().map((l, i) => (
+                <div key={i} className={`log-line ${l.level}`}>
+                  <span className="ts">{clock(l.ts)}</span>
+                  <span>{redact(l.message)}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
-    </section>
+    </details>
   );
 }

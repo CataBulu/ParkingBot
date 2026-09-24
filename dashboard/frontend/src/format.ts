@@ -22,5 +22,26 @@ export const clock = (iso: string) =>
 
 export const hourLabel = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+export const dayLabel = (iso: string) => new Date(iso).toLocaleDateString([], { day: "numeric", month: "short" });
+
+export function seconds(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return "–";
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
+export function countdown(iso: string, now = Date.now()): string {
+  const sec = Math.round((new Date(iso).getTime() - now) / 1000);
+  if (sec <= 0) return "any moment";
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
+
+export function duration(fromIso: string, now = Date.now()): string {
+  const min = Math.max(0, Math.round((now - new Date(fromIso).getTime()) / 60000));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return `${h} h ${min % 60} min`;
+  return `${Math.floor(h / 24)} days`;
+}
+
 export const dateTime = (iso: string) =>
   new Date(iso).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });

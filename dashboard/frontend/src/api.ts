@@ -28,10 +28,25 @@ export interface Schedule {
 }
 
 export interface HourBucket {
-  hour: string;
+  hour: string; // bucket start: an hour (metrics) or a day (daily)
   invocations: number;
   errors: number;
   avgDurationMs: number | null;
+  maxDurationMs: number | null;
+}
+
+export interface Kpis {
+  successRate7d: number | null;
+  runs7d: number;
+  errors7d: number;
+  runs24h: number;
+  avgDurationMs24h: number | null;
+  maxDurationMs24h: number | null;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  alerts: { days: number; urgentRuns: number; infoRuns: number; last: { ts: string; urgent: number; info: number } | null } | null;
+  monitoringSince: string | null;
+  usage: { requests: number; gbSeconds: number; freeTierPercent: number } | null;
 }
 
 export type RunKind = "ok" | "error" | "test" | "first";
@@ -76,8 +91,10 @@ export interface Status {
   function: LambdaInfo | null;
   schedule: Schedule | null;
   metrics: HourBucket[];
+  daily: HourBucket[];
   runs: Run[];
   state: BotState | null;
+  kpis: Kpis | null;
 }
 
 export interface LogLine {

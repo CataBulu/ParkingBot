@@ -94,30 +94,109 @@ def get_schedule() -> dict:
 def get_metrics(hours: int = 24) -> list[dict]:
     now = datetime.now(timezone.utc)
     start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=hours - 1)
+    return _metric_buckets(start, now, timedelta(hours=1), hours)
 
-    def query(qid, metric, stat):
-        return {"Id": qid, "MetricStat": {
-            "Metric": {"Namespace": "AWS/Lambda", "MetricName": metric,
-                       "Dimensions": [{"Name": "FunctionName", "Value": FUNCTION}]},
-            "Period": 3600, "Stat": stat}}
 
+def get_daily_metrics(days: int = 30) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+    return _metric_buckets(start, now, timedelta(days=1), days)
+
+
+def _metric_query(qid: str, metric: str, stat: str, period: int) -> dict:
+    return {"Id": qid, "MetricStat": {
+        "Metric": {"Namespace": "AWS/Lambda", "MetricName": metric,
+                   "Dimensions": [{"Name": "FunctionName", "Value": FUNCTION}]},
+        "Period": period, "Stat": stat}}
+
+
+def _metric_buckets(start: datetime, end: datetime, step: timedelta, count: int) -> list[dict]:
+    period = int(step.total_seconds())
     resp = client("cloudwatch").get_metric_data(
-        MetricDataQueries=[query("inv", "Invocations", "Sum"), query("err", "Errors", "Sum"),
-                           query("dur", "Duration", "Average")],
-        StartTime=start, EndTime=now, ScanBy="TimestampAscending",
+        MetricDataQueries=[_metric_query("inv", "Invocations", "Sum", period),
+                           _metric_query("err", "Errors", "Sum", period),
+                           _metric_query("dur", "Duration", "Average", period),
+                           _metric_query("max", "Duration", "Maximum", period)],
+        StartTime=start, EndTime=end, ScanBy="TimestampAscending",
     )
-    series = {r["Id"]: dict(zip((t.replace(minute=0, second=0, microsecond=0) for t in r["Timestamps"]), r["Values"]))
+
+    def bucket_of(t: datetime) -> datetime:
+        return start + step * int((t - start) / step)
+
+    series = {r["Id"]: {bucket_of(t): v for t, v in zip(r["Timestamps"], r["Values"])}
               for r in resp["MetricDataResults"]}
     buckets = []
-    for i in range(hours):
-        t = start + timedelta(hours=i)
+    for i in range(count):
+        t = start + step * i
         buckets.append({
-            "hour": iso(t),
+            "hour": iso(t),  # bucket start (an hour or a day)
             "invocations": int(series["inv"].get(t, 0)),
             "errors": int(series["err"].get(t, 0)),
             "avgDurationMs": round(series["dur"][t]) if t in series["dur"] else None,
+            "maxDurationMs": round(series["max"][t]) if t in series["max"] else None,
         })
     return buckets
+
+
+def get_month_usage(memory_mb: int = 256) -> dict:
+    """Month-to-date Lambda usage against the always-free tier (1M requests, 400,000 GB-s)."""
+    now = datetime.now(timezone.utc)
+    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    resp = client("cloudwatch").get_metric_data(
+        MetricDataQueries=[_metric_query("inv", "Invocations", "Sum", 86400),
+                           _metric_query("dur", "Duration", "Sum", 86400)],
+        StartTime=start, EndTime=now,
+    )
+    totals = {r["Id"]: sum(r["Values"]) for r in resp["MetricDataResults"]}
+    gb_seconds = totals.get("dur", 0) / 1000 * memory_mb / 1024
+    return {
+        "requests": int(totals.get("inv", 0)),
+        "gbSeconds": round(gb_seconds, 1),
+        "freeTierPercent": round(max(gb_seconds / 400_000, totals.get("inv", 0) / 1_000_000) * 100, 3),
+    }
+
+
+def get_alert_history(days: int = 7) -> dict:
+    """Runs that sent real alerts (not tests) in the last `days` days."""
+    events = _log_events(days * 1440, pattern='"urgent=" -"urgent=0 info=0"', max_events=500)
+    runs = []
+    for e in events:
+        m = re.search(r"urgent=(\d+) info=(\d+)", e["message"])
+        if m:
+            runs.append({"ts": iso(e["timestamp"]), "urgent": int(m.group(1)), "info": int(m.group(2))})
+    runs.sort(key=lambda r: r["ts"], reverse=True)
+    return {
+        "days": days,
+        "urgentRuns": sum(1 for r in runs if r["urgent"]),
+        "infoRuns": sum(1 for r in runs if r["info"] and not r["urgent"]),
+        "last": runs[0] if runs else None,
+    }
+
+
+def get_monitoring_since() -> str | None:
+    groups = client("logs").describe_log_groups(logGroupNamePrefix=LOG_GROUP)["logGroups"]
+    return next((iso(g["creationTime"]) for g in groups if g["logGroupName"] == LOG_GROUP), None)
+
+
+def estimate_next_run(runs: list[dict], schedule: dict | None) -> str | None:
+    """EventBridge `rate()` fires at a fixed offset; the most common offset among recent runs finds it,
+    even when manual runs are mixed in."""
+    if not schedule or schedule.get("state") != "ENABLED":
+        return None
+    m = re.match(r"rate\((\d+) minutes?\)", schedule.get("expression") or "")
+    if not m:
+        return None
+    period = int(m.group(1)) * 60
+    starts = [datetime.fromisoformat(r["start"]).timestamp() for r in runs if r["kind"] != "test"]
+    if not starts:
+        return None
+    offsets = [int(s % period) // 10 for s in starts]  # 10-second bins
+    offset = max(set(offsets), key=offsets.count) * 10 + 5
+    now = time.time()
+    nxt = now - (now % period) + offset
+    while nxt <= now:
+        nxt += period
+    return iso(nxt * 1000)
 
 
 def get_state() -> dict | None:
@@ -257,10 +336,13 @@ def build_status() -> dict:
         msg = LOGIN_HINT if is_auth_error(e) else f"{type(e).__name__}: {e}"
         return {"generatedAt": iso(now), "overall": "fail", "authOk": False, "identity": None,
                 "checks": [_check("aws", "AWS access", "fail", msg)],
-                "function": None, "schedule": None, "metrics": [], "runs": [], "state": None}
+                "function": None, "schedule": None, "metrics": [], "daily": [], "runs": [],
+                "state": None, "kpis": None}
 
     jobs = {"function": get_function, "schedule": get_schedule, "metrics": get_metrics,
-            "runs": get_runs, "state": get_state,
+            "daily": get_daily_metrics, "runs": get_runs, "state": get_state,
+            "alerts": get_alert_history, "since": get_monitoring_since,
+            "usage": get_month_usage,  # 256 MB = the function's configured memory (deploy.ps1)
             "telegramErrors": lambda: count_log_matches('"Telegram error"')}
     results, errors = {}, {}
     with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
@@ -352,8 +434,27 @@ def build_status() -> dict:
 
     rank = {"ok": 0, "unknown": 1, "warn": 2, "fail": 3}
     overall = max((c["status"] for c in checks), key=lambda s: rank[s])
+
+    daily = results.get("daily") or []
+    week = daily[-7:]
+    inv7, err7 = sum(b["invocations"] for b in week), sum(b["errors"] for b in week)
+    inv24 = sum(b["invocations"] for b in metrics)
+    dur_weighted = sum((b["avgDurationMs"] or 0) * b["invocations"] for b in metrics)
+    kpis = {
+        "successRate7d": round((inv7 - err7) / inv7 * 100, 1) if inv7 else None,
+        "runs7d": inv7,
+        "errors7d": err7,
+        "runs24h": inv24,
+        "avgDurationMs24h": round(dur_weighted / inv24) if inv24 else None,
+        "maxDurationMs24h": max((b["maxDurationMs"] or 0 for b in metrics), default=None) or None,
+        "nextRunAt": estimate_next_run(runs, sched),
+        "lastRunAt": real_runs[0]["start"] if real_runs else None,
+        "alerts": results.get("alerts"),
+        "monitoringSince": results.get("since"),
+        "usage": results.get("usage"),
+    }
     return {
         "generatedAt": iso(now), "overall": overall, "authOk": True, "identity": identity,
         "checks": checks, "function": fn, "schedule": sched, "metrics": metrics,
-        "runs": runs, "state": state,
+        "daily": daily, "runs": runs, "state": state, "kpis": kpis,
     }
