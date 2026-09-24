@@ -14,7 +14,3 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-
-# Unrelated local files
-extract_pak.py
-extracted*/

@@ -53,11 +53,11 @@ function Read-Secrets {
     } }
 }
 
-function With-EnvFile([hashtable]$envVars, [scriptblock]$action) {
-    # Temporary file (UTF-8 without BOM), deleted right after use
-    $tmp = Join-Path $env:TEMP ("parking-bot-env-" + [guid]::NewGuid() + ".json")
+function With-JsonFile([hashtable]$data, [scriptblock]$action) {
+    # Temporary JSON file (UTF-8 without BOM) passed as file://..., deleted right after use
+    $tmp = Join-Path $env:TEMP ("parking-bot-" + [guid]::NewGuid() + ".json")
     try {
-        [IO.File]::WriteAllText($tmp, ($envVars | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding $false))
+        [IO.File]::WriteAllText($tmp, ($data | ConvertTo-Json -Compress -Depth 10), (New-Object Text.UTF8Encoding $false))
         & $action "file://$tmp"
     } finally { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
 }
@@ -65,9 +65,26 @@ function With-EnvFile([hashtable]$envVars, [scriptblock]$action) {
 try {
     Write-Host "`n  === CRAIOVA PARKING BOT - Deploy ===`n" -ForegroundColor Cyan
 
-    # --- [1/5] AWS account ---
+    # --- [1/5] AWS account + IAM role ---
     $account = Aws sts get-caller-identity --query Account --output text
     Write-Host "[1/5] AWS account: $account"
+
+    # Role for the function: CloudWatch Logs + read/write of its own SSM state (created on first deploy)
+    & $aws iam get-role --role-name $IamRole --region $Region *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "      Creating IAM role $IamRole ..."
+        $trust = @{ Version = "2012-10-17"; Statement = @(@{
+            Effect = "Allow"; Principal = @{ Service = "lambda.amazonaws.com" }; Action = "sts:AssumeRole" }) }
+        With-JsonFile $trust { param($f) Aws iam create-role --role-name $IamRole --assume-role-policy-document $f | Out-Null }
+        Aws iam attach-role-policy --role-name $IamRole `
+            --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole | Out-Null
+        $ssmPolicy = @{ Version = "2012-10-17"; Statement = @(@{
+            Effect = "Allow"; Action = @("ssm:GetParameter", "ssm:PutParameter")
+            Resource = "arn:aws:ssm:${Region}:${account}:parameter/bot-parcare/*" }) }
+        With-JsonFile $ssmPolicy { param($f) Aws iam put-role-policy --role-name $IamRole --policy-name ssm-bot-parcare --policy-document $f | Out-Null }
+        Write-Host "      Waiting 15 s for the new role to propagate..."
+        Start-Sleep -Seconds 15
+    }
 
     # --- [2/5] Code package ---
     $zip = Join-Path $env:TEMP "parking_bot.zip"
@@ -81,7 +98,7 @@ try {
         Write-Host "[3/5] Creating Lambda function $FuncName ..."
         $roleArn = Aws iam get-role --role-name $IamRole --query Role.Arn --output text
         $envVars = Read-Secrets
-        With-EnvFile $envVars {
+        With-JsonFile $envVars {
             param($envFile)
             Aws lambda create-function --function-name $FuncName --runtime python3.12 `
                 --handler $Handler --role $roleArn --zip-file "fileb://$zip" `
@@ -102,7 +119,7 @@ try {
         }
         if ($UpdateSecrets) {
             $envVars = Read-Secrets
-            With-EnvFile $envVars {
+            With-JsonFile $envVars {
                 param($envFile)
                 Aws lambda update-function-configuration --function-name $FuncName --environment $envFile --query LastUpdateStatus --output text | Out-Null
             }
@@ -115,6 +132,11 @@ try {
 
     # --- [4/5] 10-minute schedule -> the function ---
     Write-Host "[4/5] Pointing schedule '$CronRule' at the function..."
+    & $aws events describe-rule --name $CronRule --region $Region *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Aws events put-rule --name $CronRule --schedule-expression "rate(10 minutes)" --state ENABLED | Out-Null
+        Write-Host "      Created schedule $CronRule (every 10 minutes)"
+    }
     & $aws lambda add-permission --function-name $FuncName --statement-id EventBridgeTrigger `
         --action lambda:InvokeFunction --principal events.amazonaws.com `
         --source-arn "arn:aws:events:${Region}:${account}:rule/$CronRule" --region $Region *> $null
