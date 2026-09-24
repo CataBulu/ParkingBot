@@ -1,0 +1,17 @@
+# Secrete locale (token Telegram) si fisierul temporar generat de deploy.bat (contine parola!)
+secrets.local.bat
+env_vars.json
+.env
+
+# Output local de la aws lambda invoke
+out*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Extractor Metin2 - alt proiect, nu tine de ParkingBot
+extract_pak.py
+extracted*/
