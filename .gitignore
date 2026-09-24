@@ -1,4 +1,4 @@
-# Secrete locale (token Telegram) si fisierul temporar generat de deploy.bat (contine parola!)
+# Secrete locale (token Telegram)
 secrets.local.bat
 env_vars.json
 .env
