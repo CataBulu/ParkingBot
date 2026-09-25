@@ -1,0 +1,3 @@
+-r dashboard/backend/requirements.txt
+pytest>=8
+httpx2

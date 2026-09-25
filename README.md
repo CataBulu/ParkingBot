@@ -1,5 +1,6 @@
 # 🅿️ Craiova Parking Bot
 
+[![CI](https://github.com/CataBulu/ParkingBot/actions/workflows/ci.yml/badge.svg)](https://github.com/CataBulu/ParkingBot/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![AWS Lambda](https://img.shields.io/badge/AWS-Lambda%20%C2%B7%20EventBridge%20%C2%B7%20SSM-FF9900?logo=amazonwebservices&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -33,6 +34,7 @@ A serverless bot that watches the **Craiova residential parking portal** (*Parko
 - [Installation](#installation)
 - [Local dashboard](#local-dashboard)
 - [Configuration](#configuration)
+- [Testing](#testing)
 - [Alerts](#alerts)
 - [Security & privacy](#security--privacy)
 - [Costs](#costs)
@@ -145,6 +147,15 @@ flowchart LR
 ├── start.bat                 # Starts the dashboard backend + frontend (dev mode)
 ├── COMMANDS.md               # Operations cheat sheet (logs, test alert, pause/resume, reset…)
 ├── legacy_selenium_bot.py    # First version (local Selenium), kept for reference
+├── requirements-dev.txt      # Test dependencies (pytest + dashboard backend deps)
+├── pytest.ini
+├── LICENSE                   # MIT
+├── .github/workflows/ci.yml  # CI: Python tests + dashboard type-check & build
+├── docs/                     # README screenshots
+├── tests/
+│   ├── conftest.py           # Hermetic setup: fake AWS credentials, no network
+│   ├── test_parking_bot.py   # Bot behaviour against a fake portal, SSM and Telegram
+│   └── test_dashboard.py     # Log parsing, health logic, API request guards
 └── dashboard/
     ├── start.ps1             # Alternative launcher: builds the UI, serves everything on :8765
     ├── backend/
@@ -278,6 +289,34 @@ The dashboard uses your local AWS CLI credentials. If the session expires, a ban
 | | `REPETITIONS` | `10` | How many times an urgent alert repeats |
 | [`deploy.ps1`](deploy.ps1) | `$Region`, `$FuncName`, `$IamRole`, `$CronRule` | `eu-central-1`, … | AWS resource names |
 | [`dashboard/backend/aws_bot.py`](dashboard/backend/aws_bot.py) | `REGION`, `FUNCTION`, `RULE`, `STATE_PARAM` | match the above | What the dashboard monitors |
+
+## Testing
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.venv\Scripts\python.exe -m pytest
+```
+
+The suite is **hermetic**: it uses dummy AWS credentials, a fake Parko Manager API, a fake SSM store and a captured Telegram, so it makes no network calls and needs no account. It covers:
+
+- **Bot behaviour:**
+  - the first run
+  - silence when nothing changed
+  - a session opening (10 urgent alerts, with only `free` + `active` spots counted)
+  - a spot taken and then freed again (alerts again)
+  - registration changes
+  - login failures (one warning after 3 in a row)
+  - recovery (the failure counter resets)
+  - test mode (never saves state)
+- **Privacy:** no Telegram message ever contains the address, residence ID or lot name, and error descriptions never expose request details.
+- **Dashboard backend:**
+  - CloudWatch log parsing (failed logins, timeouts, alert counts)
+  - the expired-sign-in check
+  - next-run estimation that ignores manual runs
+  - the API's request guards (cross-site origin, non-JSON actions, foreign `Host` header, bad input, clamping test alerts to 10)
+
+[GitHub Actions](.github/workflows/ci.yml) runs the tests on every push, plus a strict TypeScript type-check and a production build of the dashboard.
 
 ## Alerts
 
