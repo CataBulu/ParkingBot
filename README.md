@@ -6,6 +6,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![Starlette](https://img.shields.io/badge/Starlette-ASGI-009688)
 ![Telegram](https://img.shields.io/badge/alerts-Telegram-26A5E4?logo=telegram&logoColor=white)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 A serverless bot that watches the **Craiova residential parking portal** (*Parko Manager*, run by Craiova City Hall) and sends a **Telegram alert the moment a submission session opens or a parking spot near your residence becomes free**. It comes with a **local monitoring dashboard** (React + TypeScript + Starlette) that shows the bot's health, activity metrics and logs, and can send test alerts.
 
@@ -15,6 +16,8 @@ A serverless bot that watches the **Craiova residential parking portal** (*Parko
 - 🛡️ **Fails loudly:** if the bot can't log in or read the site for 30 minutes, you get a Telegram warning, and another one when it recovers.
 - 🔒 **Privacy by design:** alerts never contain your address or IDs, secrets are never committed, and the dashboard has a privacy mode for screenshots.
 - 💶 Runs **within the AWS free tier** (about $0/month).
+
+![Parking Bot dashboard: status overview, metrics and health checks](docs/dashboard.png)
 
 > **Disclaimer:** an unofficial, personal project with no affiliation to Craiova City Hall. It uses your own account on the portal, reads only what that account can see, and polls at a gentle 10-minute interval.
 
@@ -35,6 +38,7 @@ A serverless bot that watches the **Craiova residential parking portal** (*Parko
 - [Costs](#costs)
 - [Project history](#project-history)
 - [Limitations](#limitations)
+- [License](#license)
 
 ---
 
@@ -245,7 +249,7 @@ Alternatively, `powershell -ExecutionPolicy Bypass -File dashboard\start.ps1` bu
 
 **What it shows:**
 
-- **Status overview:** a plain-language verdict ("All systems go" / "Something needs a look" / "The bot needs your attention"), the last check, a live countdown to the next check, the session state, and free spots nearby.
+- **Status overview:** a plain-language verdict ("All systems are working" / "Something needs a look" / "The bot needs your attention"), the last check, a live countdown to the next check, the session state, and free spots nearby.
 - **Metrics:** success rate (7 days), checks in the last 24 h, average and slowest check time, alerts sent, time monitored, and cost this month as a share of the free tier.
 - **7 health checks:** AWS access, Lambda state, schedule on and targeting the bot, last run on time and successful, errors in 24 h, parking-site login, Telegram delivery.
 - **Activity charts:** checks per hour or day (successful vs failed) and average check time, over 24 h, 7 days or 30 days, with hover tooltips and a table view.
@@ -253,6 +257,13 @@ Alternatively, `powershell -ExecutionPolicy Bypass -File dashboard\start.ps1` bu
 - **Recent runs** and collapsible **Lambda logs** with an errors-only filter.
 - **Actions:** *Send test alert* (1, 3 or 10 messages) and *Run check now*.
 - **Light blue / Dark / Auto** themes, and a **privacy mode** (on by default) that masks the address, residence ID and AWS account number, so the page is safe to screenshot.
+
+<details>
+<summary><b>Full dashboard screenshot</b> (activity charts, recent runs, logs)</summary>
+
+![Full Parking Bot dashboard](docs/dashboard-full.png)
+
+</details>
 
 The dashboard uses your local AWS CLI credentials. If the session expires, a banner tells you to run `aws login` again.
 
@@ -325,3 +336,7 @@ The dashboard's *Cost this month* tile tracks this live.
 - **Unofficial API.** The portal's API isn't documented or guaranteed. If it changes, the bot's runs will start failing, and you'll get the ⚠️ warning within about 30 minutes.
 - **Windows-oriented tooling.** The deploy and start scripts are PowerShell and batch. The bot itself is platform-independent, and the same steps can be done with the AWS CLI on any OS.
 - **Single account.** The bot watches the residences of the one Parko Manager account it logs in with.
+
+## License
+
+Released under the [MIT License](LICENSE).

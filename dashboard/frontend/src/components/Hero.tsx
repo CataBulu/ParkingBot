@@ -4,7 +4,7 @@ import { StatusIcon } from "./StatusIcon";
 import type { Redact } from "../privacy";
 
 const HEADLINE = {
-  ok: ["All systems go", "The bot is watching the parking site for you and will ping you on Telegram."],
+  ok: ["All systems are working", "The bot is watching the parking site for you and will ping you on Telegram."],
   warn: ["Something needs a look", "The bot is still running, but one of the checks below isn't quite right."],
   fail: ["The bot needs your attention", "It may not be able to alert you right now. See what's failing below."],
   unknown: ["Checking…", "Some information couldn't be read from AWS."],
